@@ -8,7 +8,15 @@
   <input type="text" id="taskNote" placeholder="What are you working on?">
 
   <div class="pomodoro-container">
-    <div class="timer" id="timer">25:00</div>
+    <div class="progress-ring">
+      <svg id="progressSvg" width="180" height="180">
+        <circle cx="90" cy="90" r="80" stroke="#ccc" stroke-width="10" fill="none" />
+        <circle id="progressCircle" cx="90" cy="90" r="80" stroke="#4CAF50" stroke-width="10" fill="none"
+          stroke-dasharray="502" stroke-dashoffset="0" />
+      </svg>
+      <div class="timer" id="timer">25:00:000</div>
+    </div>
+
     <div class="controls">
       <button id="startBtn">Start</button>
       <button id="stopBtn" disabled>Stop</button>
@@ -27,6 +35,7 @@
         <th>Duration</th>
         <th>Stops</th>
         <th>Note</th>
+        <th>Actions</th>
       </tr>
     </thead>
     <tbody>
@@ -40,6 +49,9 @@
         </td>
         <td>{{ s.events|selectattr('event_type','equalto','stop')|list|length }}</td>
         <td>{{ s.note }}</td>
+        <td>
+          <button onclick="deleteSession('{{ s.id }}')">Delete</button>
+        </td>
       </tr>
       {% endfor %}
     </tbody>
@@ -52,88 +64,132 @@
 
 {% block scripts %}
 <script>
-let minutes = 25, seconds = 0;
-let timerId = null, currentSessionId = null;
+let totalMs = 25 * 60 * 1000;
+let remainingMs = totalMs;
+let interval = null;
+let currentSessionId = null;
 
-function updateDisplay() {
-  const m = String(minutes).padStart(2,'0');
-  const s = String(seconds).padStart(2,'0');
-  document.getElementById('timer').textContent = `${m}:${s}`;
+const timerDisplay = document.getElementById('timer');
+const progressCircle = document.getElementById('progressCircle');
+const radius = 80;
+const circumference = 2 * Math.PI * radius;
+progressCircle.style.strokeDasharray = circumference;
+
+function updateTimerDisplay() {
+  let minutes = Math.floor(remainingMs / 60000);
+  let seconds = Math.floor((remainingMs % 60000) / 1000);
+  let ms = remainingMs % 1000;
+  timerDisplay.textContent =
+    `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}:${String(ms).padStart(3, '0')}`;
+}
+
+function updateProgressCircle() {
+  const offset = circumference * (1 - remainingMs / totalMs);
+  progressCircle.style.strokeDashoffset = offset;
 }
 
 function tick() {
-  if (seconds === 0) {
-    if (minutes === 0) return clearInterval(timerId);
-    minutes--; seconds = 59;
-  } else {
-    seconds--;
+  remainingMs -= 50;
+  if (remainingMs <= 0) {
+    clearInterval(interval);
+    interval = null;
+    remainingMs = 0;
   }
-  updateDisplay();
+  updateTimerDisplay();
+  updateProgressCircle();
 }
 
 document.getElementById('startBtn').onclick = async () => {
-    document.getElementById('clickSound').play(); 
+  const clickSound = document.getElementById('clickSound');
+  clickSound.currentTime = 0;
+  clickSound.play();
+
   if (!currentSessionId) {
     const res = await fetch('{{ url_for("session_start") }}', {
-      method:'POST', headers:{'Content-Type':'application/json'}
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' }
     });
     const data = await res.json();
     currentSessionId = data.session_id;
   }
-  timerId = setInterval(tick, 1000);
+
+  if (!interval) {
+    interval = setInterval(tick, 50);
+  }
+
   document.getElementById('stopBtn').disabled = false;
   document.getElementById('startBtn').disabled = true;
 };
 
-document.getElementById('stopBtn').onclick = async () => {
-    document.getElementById('clickSound').play(); 
-  clearInterval(timerId);
-  await fetch('{{ url_for("session_stop") }}', {
-    method:'POST',
-    headers:{'Content-Type':'application/json'},
-    body: JSON.stringify({ session_id: currentSessionId })
-  });
+document.getElementById('stopBtn').onclick = () => {
+  document.getElementById('clickSound').play();
+  clearInterval(interval);
+  interval = null;
   document.getElementById('saveBtn').disabled = false;
   document.getElementById('stopBtn').disabled = true;
-  document.getElementById('startBtn').disabled = false; // Pridaná táto čiara
-
+  document.getElementById('startBtn').disabled = false;
 };
 
 document.getElementById('saveBtn').onclick = async () => {
-    document.getElementById('clickSound').play(); 
+  document.getElementById('clickSound').play();
   const note = document.getElementById('taskNote').value;
   await fetch('{{ url_for("session_save") }}', {
-    method:'POST',
-    headers:{'Content-Type':'application/json'},
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ session_id: currentSessionId, note })
   });
   alert('Session saved!');
-  clearInterval(timerId);
-  minutes = 25; seconds = 0; updateDisplay();
-  currentSessionId = null;
-  document.getElementById('startBtn').disabled = false;
-  document.getElementById('saveBtn').disabled = true;
-  // Optionally reload page to refresh the sessions table:
+  resetTimer();
   location.reload();
 };
 
 document.getElementById('resetBtn').onclick = async () => {
-    document.getElementById('clickSound').play(); 
+  document.getElementById('clickSound').play();
   if (currentSessionId && confirm('Discard current session?')) {
     await fetch('{{ url_for("session_reset") }}', {
-      method:'POST',
-      headers:{'Content-Type':'application/json'},
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ session_id: currentSessionId })
     });
   }
-  clearInterval(timerId);
-  minutes = 25; seconds = 0; updateDisplay();
+  resetTimer();
+};
+
+function resetTimer() {
+  clearInterval(interval);
+  interval = null;
+  remainingMs = totalMs;
   currentSessionId = null;
+  updateTimerDisplay();
+  updateProgressCircle();
   document.getElementById('startBtn').disabled = false;
   document.getElementById('stopBtn').disabled = true;
   document.getElementById('saveBtn').disabled = true;
-};
+}
 
+async function deleteSession(sessionId) {
+  const clickSound = document.getElementById('clickSound');
+  clickSound.currentTime = 0;
+  clickSound.play();
 
+  const confirmed = confirm('Are you sure you want to delete this session?');
+  if (!confirmed) return;
+
+  const res = await fetch('{{ url_for("session_delete") }}', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ session_id: sessionId })
+  });
+
+  if (res.ok) {
+    alert('Session deleted!');
+    location.reload();
+  } else {
+    alert('Failed to delete session.');
+  }
+}
+
+updateTimerDisplay();
+updateProgressCircle();
 </script>
 {% endblock %}

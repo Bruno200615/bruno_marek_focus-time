@@ -157,7 +157,6 @@ def session_delete():
     db.session.commit()
     return jsonify({'status': 'deleted'}), 200
 
-
 # Run server
 def main():
     with app.app_context():
