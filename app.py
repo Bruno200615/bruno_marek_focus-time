@@ -5,10 +5,16 @@ from extensions import db, bcrypt, login_manager
 from models import User, Session, SessionEvent
 from chat.routes import chat_bp
 from datetime import datetime, timezone
+from flask import Flask, render_template, url_for, redirect, request, flash, jsonify
+import openai
+import os
+from dotenv import load_dotenv
 
 
 
 def create_app():
+    load_dotenv()
+    
     app = Flask(__name__)
 
     # Config

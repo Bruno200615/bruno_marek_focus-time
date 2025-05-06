@@ -1,7 +1,9 @@
 import openai
-
+import os
+from dotenv import load_dotenv
 # Hard-coded API key (pre dev/testing)
-client = openai.OpenAI(api_key="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")
+load_dotenv()
+client = openai.OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 SYSTEM_PROMPT = """
 You are a Pomodoro productivity assistant. Your role is to:
