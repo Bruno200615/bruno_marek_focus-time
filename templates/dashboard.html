@@ -1,0 +1,55 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="dashboard">
+    <h1>Welcome, {{ username }}! 🍅</h1>
+    <div class="pomodoro-container">
+        <div class="timer" id="timer">25:00</div>
+        <div class="controls">
+            <button onclick="startTimer()">Start</button>
+            <button onclick="pauseTimer()">Pause</button>
+            <button onclick="resetTimer()">Reset</button>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+let timeLeft = 1500; // 25 minutes in seconds
+let timerId = null;
+
+function updateDisplay() {
+    const minutes = Math.floor(timeLeft / 60);
+    const seconds = timeLeft % 60;
+    document.getElementById('timer').textContent = 
+        `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+}
+
+function startTimer() {
+    if (!timerId) {
+        timerId = setInterval(() => {
+            timeLeft--;
+            updateDisplay();
+            if (timeLeft === 0) {
+                clearInterval(timerId);
+                alert('Time is up! Take a 5-minute break!');
+                timeLeft = 300; // Reset to 5 minutes for break
+                updateDisplay();
+            }
+        }, 1000);
+    }
+}
+
+function pauseTimer() {
+    clearInterval(timerId);
+    timerId = null;
+}
+
+function resetTimer() {
+    clearInterval(timerId);
+    timerId = null;
+    timeLeft = 1500;
+    updateDisplay();
+}
+</script>
+{% endblock %}
