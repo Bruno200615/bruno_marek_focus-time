@@ -1,29 +1,53 @@
 {% extends "base.html" %}
 {% block content %}
 <div class="history">
-    <h2>Your Focus History</h2>
-    {% if sessions %}
-    <table>
-        <thead>
-            <tr>
-                <th>Date &amp; Time</th>
-                <th>Note</th>
-                <th>Duration</th>
-            </tr>
-        </thead>
-        <tbody>
-        {% for sess in sessions %}
-            <tr>
-                <td>{{ sess.timestamp.strftime('%Y-%m-%d %H:%M') }}</td>
-                <td>{{ sess.note }}</td>
-                <td>{{ (sess.duration//60)|string }}m {{ (sess.duration%60)|string }}s</td>
-            </tr>
-        {% endfor %}
-        </tbody>
-    </table>
-    {% else %}
-        <p>No sessions recorded yet.</p>
-    {% endif %}
-    <a href="{{ url_for('dashboard') }}">← Back to Dashboard</a>
+  <h2>Your Focus History</h2>
+  {% if sessions %}
+  <table>
+    <thead>
+      <tr>
+        <th>Date & Time</th>
+        <th>Note</th>
+        <th>Duration</th>
+        <th>Actions</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for sess in sessions %}
+      <tr id="hist-{{ sess.id }}">
+        <td>{{ sess.timestamp.strftime('%Y-%m-%d %H:%M') }}</td>
+        <td>{{ sess.note }}</td>
+        <td>{{ (sess.duration//60)|string }}m {{ (sess.duration%60)|string }}s</td>
+        <td>
+          <button class="histDeleteBtn" data-id="{{ sess.id }}">Delete</button>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+    <p>No sessions recorded yet.</p>
+  {% endif %}
+  <a href="{{ url_for('dashboard') }}">← Back to Dashboard</a>
 </div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const clickSnd = new Audio("{{ url_for('static', filename='click.wav') }}");
+document.querySelectorAll('.histDeleteBtn').forEach(btn => {
+  btn.onclick = async () => {
+    clickSnd.play().catch(()=>{});
+    const id = btn.dataset.id;
+    if (confirm('Delete this historical record?')) {
+      await fetch('{{ url_for("session_delete") }}', {
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ session_id: id })
+      });
+      document.getElementById(`hist-${id}`).remove();
+    }
+  }
+});
+</script>
 {% endblock %}

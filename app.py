@@ -140,6 +140,24 @@ def session_reset():
     db.session.commit()
     return jsonify({'status': 'ok'}), 200
 
+
+@app.route('/session/delete', methods=['POST'])
+@login_required
+def session_delete():
+    data = request.get_json() or {}
+    session_id = data.get('session_id')
+    
+    # Najprv vymaž eventy
+    SessionEvent.query.filter_by(session_id=session_id).delete()
+    
+    # Potom vymaž session
+    session = Session.query.filter_by(id=session_id, user_id=current_user.id).first_or_404()
+    db.session.delete(session)
+    
+    db.session.commit()
+    return jsonify({'status': 'deleted'}), 200
+
+
 # Run server
 def main():
     with app.app_context():

@@ -3,6 +3,8 @@
 <div class="dashboard">
   <h1>Welcome, {{ username }}! 🍅</h1>
 
+  <audio id="clickSound" src="{{ url_for('static', filename='click.wav') }}"></audio>
+
   <input type="text" id="taskNote" placeholder="What are you working on?">
 
   <div class="pomodoro-container">
@@ -70,6 +72,7 @@ function tick() {
 }
 
 document.getElementById('startBtn').onclick = async () => {
+    document.getElementById('clickSound').play(); 
   if (!currentSessionId) {
     const res = await fetch('{{ url_for("session_start") }}', {
       method:'POST', headers:{'Content-Type':'application/json'}
@@ -83,6 +86,7 @@ document.getElementById('startBtn').onclick = async () => {
 };
 
 document.getElementById('stopBtn').onclick = async () => {
+    document.getElementById('clickSound').play(); 
   clearInterval(timerId);
   await fetch('{{ url_for("session_stop") }}', {
     method:'POST',
@@ -91,9 +95,12 @@ document.getElementById('stopBtn').onclick = async () => {
   });
   document.getElementById('saveBtn').disabled = false;
   document.getElementById('stopBtn').disabled = true;
+  document.getElementById('startBtn').disabled = false; // Pridaná táto čiara
+
 };
 
 document.getElementById('saveBtn').onclick = async () => {
+    document.getElementById('clickSound').play(); 
   const note = document.getElementById('taskNote').value;
   await fetch('{{ url_for("session_save") }}', {
     method:'POST',
@@ -111,6 +118,7 @@ document.getElementById('saveBtn').onclick = async () => {
 };
 
 document.getElementById('resetBtn').onclick = async () => {
+    document.getElementById('clickSound').play(); 
   if (currentSessionId && confirm('Discard current session?')) {
     await fetch('{{ url_for("session_reset") }}', {
       method:'POST',
@@ -125,5 +133,7 @@ document.getElementById('resetBtn').onclick = async () => {
   document.getElementById('stopBtn').disabled = true;
   document.getElementById('saveBtn').disabled = true;
 };
+
+
 </script>
 {% endblock %}
