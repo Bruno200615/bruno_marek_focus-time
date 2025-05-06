@@ -1,105 +1,152 @@
-# Importovanie potrebných knižníc z Flasku a jeho rozšírení
-from flask import Flask, render_template, url_for, redirect, request, flash
+from datetime import datetime
+from flask import Flask, render_template, url_for, redirect, request, flash, jsonify
 from flask_sqlalchemy import SQLAlchemy
 from flask_login import LoginManager, UserMixin, login_user, login_required, logout_user, current_user
 from flask_bcrypt import Bcrypt
 
-# Inicializácia Flask aplikácie
 app = Flask(__name__)
-
-# Nastavenie tajného kľúča (napr. pre sessions a flash správy)
 app.config['SECRET_KEY'] = '5791628bb0b13ce0c676dfde280ba245'
-
-# Nastavenie cesty k databáze SQLite
 app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///site.db'
 
-# Inicializácia databázy, hashovania hesiel a systému prihlásenia
-db = SQLAlchemy(app)
+# Initialize extensions
 bcrypt = Bcrypt(app)
+db = SQLAlchemy(app)
 login_manager = LoginManager(app)
-login_manager.login_view = 'login'  # Ak nie je používateľ prihlásený, presmeruje ho na túto stránku
+login_manager.login_view = 'login'
 
-# Definícia modelu používateľa v databáze
+# Models
 class User(db.Model, UserMixin):
-    id = db.Column(db.Integer, primary_key=True)  # Primárny kľúč
-    username = db.Column(db.String(20), unique=True, nullable=False)  # Meno používateľa, musí byť unikátne
-    password = db.Column(db.String(60), nullable=False)  # Zašifrované heslo
+    id = db.Column(db.Integer, primary_key=True)
+    username = db.Column(db.String(20), unique=True, nullable=False)
+    password = db.Column(db.String(60), nullable=False)
+    sessions = db.relationship('Session', backref='user', lazy=True)
 
-# Funkcia, ktorú používa Flask-Login na načítanie používateľa podľa ID
+class Session(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    note = db.Column(db.String(200), nullable=True)
+    started_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+    ended_at = db.Column(db.DateTime, nullable=True)
+    events = db.relationship('SessionEvent', backref='session', lazy=True)
+
+class SessionEvent(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    session_id = db.Column(db.Integer, db.ForeignKey('session.id'), nullable=False)
+    event_type = db.Column(db.String(10), nullable=False)  # 'start' or 'stop'
+    timestamp = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+
+# User loader for Flask-Login
 @login_manager.user_loader
 def load_user(user_id):
     return User.query.get(int(user_id))
 
-# Hlavná stránka (presmeruje na login)
+# Basic auth & pages
 @app.route('/')
 def home():
     return redirect(url_for('login'))
 
-# Registračná stránka
 @app.route('/register', methods=['GET', 'POST'])
 def register():
-    # Ak je už používateľ prihlásený, presmeruje ho na dashboard
     if current_user.is_authenticated:
         return redirect(url_for('dashboard'))
-    
-    # Ak bol odoslaný formulár
     if request.method == 'POST':
         username = request.form['username']
         password = request.form['password']
-        
-        # Skontroluje, či už meno existuje v databáze
         if User.query.filter_by(username=username).first():
-            flash('Username already exists!', 'danger')  # Zobrazí chybovú hlášku
+            flash('Username already exists!', 'danger')
             return redirect(url_for('register'))
-        
-        # Zašifruje heslo a uloží používateľa do databázy
-        hashed_password = bcrypt.generate_password_hash(password).decode('utf-8')
-        user = User(username=username, password=hashed_password)
+        hashed = bcrypt.generate_password_hash(password).decode('utf-8')
+        user = User(username=username, password=hashed)
         db.session.add(user)
         db.session.commit()
-        
-        flash('Account created! Please login', 'success')  # Zobrazí úspešnú hlášku
+        flash('Account created! Please login', 'success')
         return redirect(url_for('login'))
-    
-    # Ak GET požiadavka, zobrazí registračný formulár
     return render_template('register.html')
 
-# Prihlasovacia stránka
 @app.route('/login', methods=['GET', 'POST'])
 def login():
-    # Ak je používateľ už prihlásený, presmeruje ho na dashboard
     if current_user.is_authenticated:
         return redirect(url_for('dashboard'))
-    
-    # Spracovanie prihlasovacieho formulára
     if request.method == 'POST':
         username = request.form['username']
         password = request.form['password']
         user = User.query.filter_by(username=username).first()
-        
-        # Skontroluje, či používateľ existuje a či heslo sedí
         if user and bcrypt.check_password_hash(user.password, password):
-            login_user(user)  # Prihlási používateľa
+            login_user(user)
             return redirect(url_for('dashboard'))
-        else:
-            flash('Login failed. Check username/password', 'danger')  # Zobrazí chybovú hlášku
-    
-    return render_template('login.html')  # Zobrazí prihlasovací formulár
+        flash('Login failed. Check username/password', 'danger')
+    return render_template('login.html')
 
-# Odhlásenie používateľa
 @app.route('/logout')
 def logout():
     logout_user()
-    return redirect(url_for('login'))  # Presmeruje na login po odhlásení
+    return redirect(url_for('login'))
 
-# Chránená stránka - dashboard (iba pre prihlásených používateľov)
 @app.route('/dashboard')
 @login_required
 def dashboard():
-    return render_template('dashboard.html', username=current_user.username)
+    # Retrieve only finished sessions
+    sessions = (
+        Session.query
+        .filter(Session.user_id == current_user.id, Session.ended_at.isnot(None))
+        .order_by(Session.started_at.desc())
+        .all()
+    )
+    return render_template('dashboard.html', username=current_user.username, sessions=sessions)
 
-# Spustenie aplikácie
-if __name__ == '__main__':
+# Session control endpoints
+@app.route('/session/start', methods=['POST'])
+@login_required
+def session_start():
+    sess = Session(user=current_user)
+    db.session.add(sess)
+    db.session.commit()
+    evt = SessionEvent(session_id=sess.id, event_type='start')
+    db.session.add(evt)
+    db.session.commit()
+    return jsonify({'session_id': sess.id}), 201
+
+@app.route('/session/stop', methods=['POST'])
+@login_required
+def session_stop():
+    data = request.get_json() or {}
+    sess_id = data.get('session_id')
+    session = Session.query.filter_by(id=sess_id, user_id=current_user.id).first_or_404()
+    evt = SessionEvent(session_id=session.id, event_type='stop')
+    db.session.add(evt)
+    db.session.commit()
+    return jsonify({'status': 'ok'}), 201
+
+@app.route('/session/save', methods=['POST'])
+@login_required
+def session_save():
+    data = request.get_json() or {}
+    sess_id = data.get('session_id')
+    note = data.get('note', '')
+    session = Session.query.filter_by(id=sess_id, user_id=current_user.id).first_or_404()
+    session.note = note
+    session.ended_at = datetime.utcnow()
+    db.session.commit()
+    return jsonify({'status': 'ok'}), 200
+
+@app.route('/session/reset', methods=['POST'])
+@login_required
+def session_reset():
+    data = request.get_json() or {}
+    sess_id = data.get('session_id')
+    session = Session.query.filter_by(id=sess_id, user_id=current_user.id).first_or_404()
+    SessionEvent.query.filter_by(session_id=session.id).delete()
+    db.session.delete(session)
+    db.session.commit()
+    return jsonify({'status': 'ok'}), 200
+
+# Run server
+def main():
     with app.app_context():
-        db.create_all()  # Vytvorí databázové tabuľky, ak ešte neexistujú
-    app.run(debug=True)  # Spustí Flask server s debug režimom (zobrazovanie chýb)
+        # Drop and recreate tables to apply new schema
+        db.drop_all()
+        db.create_all()
+    app.run(debug=True)
+
+if __name__ == '__main__':
+    main()

@@ -1,55 +1,129 @@
 {% extends "base.html" %}
 {% block content %}
 <div class="dashboard">
-    <h1>Welcome, {{ username }}! 🍅</h1>
-    <div class="pomodoro-container">
-        <div class="timer" id="timer">25:00</div>
-        <div class="controls">
-            <button onclick="startTimer()">Start</button>
-            <button onclick="pauseTimer()">Pause</button>
-            <button onclick="resetTimer()">Reset</button>
-        </div>
+  <h1>Welcome, {{ username }}! 🍅</h1>
+
+  <input type="text" id="taskNote" placeholder="What are you working on?">
+
+  <div class="pomodoro-container">
+    <div class="timer" id="timer">25:00</div>
+    <div class="controls">
+      <button id="startBtn">Start</button>
+      <button id="stopBtn" disabled>Stop</button>
+      <button id="saveBtn" disabled>Save</button>
+      <button id="resetBtn">Reset</button>
     </div>
+  </div>
+
+  <h2>Your Sessions</h2>
+  {% if sessions %}
+  <table>
+    <thead>
+      <tr>
+        <th>Started At</th>
+        <th>Ended At</th>
+        <th>Duration</th>
+        <th>Stops</th>
+        <th>Note</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for s in sessions %}
+      <tr>
+        <td>{{ s.started_at.strftime('%Y-%m-%d %H:%M') }}</td>
+        <td>{{ s.ended_at.strftime('%Y-%m-%d %H:%M') }}</td>
+        <td>
+          {% set total = (s.ended_at - s.started_at).seconds %}
+          {{ (total // 60)|string }}m {{ (total % 60)|string }}s
+        </td>
+        <td>{{ s.events|selectattr('event_type','equalto','stop')|list|length }}</td>
+        <td>{{ s.note }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+    <p>No sessions recorded yet.</p>
+  {% endif %}
 </div>
 {% endblock %}
 
 {% block scripts %}
 <script>
-let timeLeft = 1500; // 25 minutes in seconds
-let timerId = null;
+let minutes = 25, seconds = 0;
+let timerId = null, currentSessionId = null;
 
 function updateDisplay() {
-    const minutes = Math.floor(timeLeft / 60);
-    const seconds = timeLeft % 60;
-    document.getElementById('timer').textContent = 
-        `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+  const m = String(minutes).padStart(2,'0');
+  const s = String(seconds).padStart(2,'0');
+  document.getElementById('timer').textContent = `${m}:${s}`;
 }
 
-function startTimer() {
-    if (!timerId) {
-        timerId = setInterval(() => {
-            timeLeft--;
-            updateDisplay();
-            if (timeLeft === 0) {
-                clearInterval(timerId);
-                alert('Time is up! Take a 5-minute break!');
-                timeLeft = 300; // Reset to 5 minutes for break
-                updateDisplay();
-            }
-        }, 1000);
-    }
+function tick() {
+  if (seconds === 0) {
+    if (minutes === 0) return clearInterval(timerId);
+    minutes--; seconds = 59;
+  } else {
+    seconds--;
+  }
+  updateDisplay();
 }
 
-function pauseTimer() {
-    clearInterval(timerId);
-    timerId = null;
-}
+document.getElementById('startBtn').onclick = async () => {
+  if (!currentSessionId) {
+    const res = await fetch('{{ url_for("session_start") }}', {
+      method:'POST', headers:{'Content-Type':'application/json'}
+    });
+    const data = await res.json();
+    currentSessionId = data.session_id;
+  }
+  timerId = setInterval(tick, 1000);
+  document.getElementById('stopBtn').disabled = false;
+  document.getElementById('startBtn').disabled = true;
+};
 
-function resetTimer() {
-    clearInterval(timerId);
-    timerId = null;
-    timeLeft = 1500;
-    updateDisplay();
-}
+document.getElementById('stopBtn').onclick = async () => {
+  clearInterval(timerId);
+  await fetch('{{ url_for("session_stop") }}', {
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({ session_id: currentSessionId })
+  });
+  document.getElementById('saveBtn').disabled = false;
+  document.getElementById('stopBtn').disabled = true;
+};
+
+document.getElementById('saveBtn').onclick = async () => {
+  const note = document.getElementById('taskNote').value;
+  await fetch('{{ url_for("session_save") }}', {
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({ session_id: currentSessionId, note })
+  });
+  alert('Session saved!');
+  clearInterval(timerId);
+  minutes = 25; seconds = 0; updateDisplay();
+  currentSessionId = null;
+  document.getElementById('startBtn').disabled = false;
+  document.getElementById('saveBtn').disabled = true;
+  // Optionally reload page to refresh the sessions table:
+  location.reload();
+};
+
+document.getElementById('resetBtn').onclick = async () => {
+  if (currentSessionId && confirm('Discard current session?')) {
+    await fetch('{{ url_for("session_reset") }}', {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ session_id: currentSessionId })
+    });
+  }
+  clearInterval(timerId);
+  minutes = 25; seconds = 0; updateDisplay();
+  currentSessionId = null;
+  document.getElementById('startBtn').disabled = false;
+  document.getElementById('stopBtn').disabled = true;
+  document.getElementById('saveBtn').disabled = true;
+};
 </script>
 {% endblock %}

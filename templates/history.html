@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="history">
+    <h2>Your Focus History</h2>
+    {% if sessions %}
+    <table>
+        <thead>
+            <tr>
+                <th>Date &amp; Time</th>
+                <th>Note</th>
+                <th>Duration</th>
+            </tr>
+        </thead>
+        <tbody>
+        {% for sess in sessions %}
+            <tr>
+                <td>{{ sess.timestamp.strftime('%Y-%m-%d %H:%M') }}</td>
+                <td>{{ sess.note }}</td>
+                <td>{{ (sess.duration//60)|string }}m {{ (sess.duration%60)|string }}s</td>
+            </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+        <p>No sessions recorded yet.</p>
+    {% endif %}
+    <a href="{{ url_for('dashboard') }}">← Back to Dashboard</a>
+</div>
+{% endblock %}
