@@ -6,11 +6,9 @@ from models import User, Session, SessionEvent
 from chat.routes import chat_bp
 from datetime import datetime, timezone
 from flask import Flask, render_template, url_for, redirect, request, flash, jsonify
-import openai
 import os
 from dotenv import load_dotenv
 from datetime import datetime  
-
 
 
 def create_app():
@@ -21,7 +19,7 @@ def create_app():
     app.config['SECRET_KEY'] = '5791628bb0b13ce0c676dfde280ba245'
     app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///site.db'
     app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
-    openai.api_key ="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"
+    app.config['OPENAI_API_KEY'] = os.getenv('OPENAI_API_KEY')
     # Initialize extensions
     db.init_app(app)
     bcrypt.init_app(app)
@@ -165,10 +163,7 @@ def create_app():
 
         return jsonify({'status': 'stopped'}), 200
 
-
-    with app.app_context():
-        db.create_all()
-
+ 
     return app
 
 

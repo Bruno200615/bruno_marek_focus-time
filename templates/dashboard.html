@@ -241,29 +241,69 @@
     });
     
     chatSend.addEventListener('click', async () => {
-        const text = chatInput.value.trim();
-        if (!text) return;
-        
-        clickSound.play();
-        chatLog.innerHTML += `<div class="user-msg">${text}</div>`;
-        chatInput.value = '';
-        chatLog.lastElementChild.scrollIntoView();
+    const text = chatInput.value.trim();
+    if (!text) return;
     
-        try {
-            const res = await fetch('/chat/message', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ message: text })
-            });
-            if (!res.ok) throw new Error('Send failed');
-            const reply = await res.text();
-            chatLog.innerHTML += `<div class="bot-msg">${reply}</div>`;
-            chatLog.lastElementChild.scrollIntoView();
-        } catch (error) {
-            console.error('Send error:', error);
-            chatLog.innerHTML += `<div class="bot-msg error">Error: ${error.message}</div>`;
+    clickSound.play();
+    chatLog.innerHTML += `<div class="user-msg">${text}</div>`;
+    chatInput.value = '';
+    chatLog.lastElementChild.scrollIntoView({ behavior: 'smooth' });
+
+    try {
+        const response = await fetch('/chat/message', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ message: text })
+        });
+        
+        if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
         }
-    });
+
+        const data = await response.json();
+        
+        if (data.error) {
+            throw new Error(data.error);
+        }
+
+        chatLog.innerHTML += `<div class="bot-msg">${data.response}</div>`;
+        chatLog.lastElementChild.scrollIntoView({ behavior: 'smooth' });
+        
+    } catch (error) {
+        console.error('Chat error:', error);
+        chatLog.innerHTML += `
+            <div class="bot-msg error">
+                Error: ${error.message || 'Failed to send message'}
+            </div>
+        `;
+        chatLog.lastElementChild.scrollIntoView({ behavior: 'smooth' });
+    }
+});
+
+analyzeBtn.addEventListener('click', async () => {
+    clickSound.play();
+    try {
+        const response = await fetch('/chat/analyze', { method: 'POST' });
+        
+        if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+        }
+
+        const html = await response.text();
+        chatLog.innerHTML += `<div class="bot-msg">${html}</div>`;
+        chatWidget.classList.remove('hidden');
+        chatLog.lastElementChild.scrollIntoView({ behavior: 'smooth' });
+        
+    } catch (error) {
+        console.error('Analysis error:', error);
+        chatLog.innerHTML += `
+            <div class="bot-msg error">
+                Error: ${error.message || 'Failed to analyze sessions'}
+            </div>
+        `;
+        chatLog.lastElementChild.scrollIntoView({ behavior: 'smooth' });
+    }
+});
     
     analyzeBtn.addEventListener('click', async () => {
         clickSound.play();
@@ -388,7 +428,6 @@
         }
     };
     
-    // Initial setup
     toggleControls(false);
     saveBtn.classList.add('hidden');
     updateTimerDisplay();
