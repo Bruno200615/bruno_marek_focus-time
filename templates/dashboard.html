@@ -1,11 +1,18 @@
 {% extends "base.html" %}
 {% block content %}
+
 <div class="dashboard">
   <h1>Welcome, {{ username }}! 🍅</h1>
-
   <audio id="clickSound" src="{{ url_for('static', filename='click.wav') }}"></audio>
 
-  <input type="text" id="taskNote" placeholder="What are you working on?">
+  <div class="break-controls">
+    <button id="longBreakBtn" class="hidden">
+      Long Break (15m)
+    </button>
+    <button id="shortBreakBtn" class="hidden">
+      Short Break (5m)
+    </button>
+  </div>
 
   <div class="pomodoro-container">
     <div class="progress-ring">
@@ -18,14 +25,43 @@
     </div>
 
     <div class="controls">
-      <button id="startBtn">Start</button>
-      <button id="stopBtn" disabled>Stop</button>
-      <button id="saveBtn" disabled>Save</button>
-      <button id="resetBtn">Reset</button>
+      <button id="startBtn">
+        START
+      </button>
+      <button id="resumeBtn" class="hidden">
+        <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <polygon points="6 3 20 12 6 21 6 3"/>
+        </svg>
+        RESUME
+      </button>
+      <button id="stopBtn" class="hidden">
+        <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="12" r="10"/><rect x="9" y="9" width="6" height="6" rx="1"/>
+        </svg>
+        STOP
+      </button>
+      <button id="skipBtn" class="hidden">
+        <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <polygon points="5 4 15 12 5 20 5 4"/><line x1="19" x2="19" y1="5" y2="19"/>
+        </svg>
+        SKIP
+      </button>
+      <button id="saveBtn" class="hidden">
+        <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M12 3v12"/><path d="m8 11 4 4 4-4"/><path d="M8 5H4a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-4"/>
+        </svg>
+        SAVE
+      </button>
+      <button id="resetBtn">
+        <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/>
+        </svg>
+        RESET
+      </button>
     </div>
   </div>
 
-  <h2>Your Sessions</h2>
+  <h2>Session History</h2>
   {% if sessions %}
   <table>
     <thead>
@@ -34,8 +70,9 @@
         <th>Ended At</th>
         <th>Duration</th>
         <th>Stops</th>
+        <th>Skips</th>
+        <th>Breaks</th>
         <th>Note</th>
-        <th>Actions</th>
       </tr>
     </thead>
     <tbody>
@@ -52,16 +89,17 @@
         <td>
           {% if s.ended_at %}
             {% set total = (s.ended_at - s.started_at).seconds %}
-            {{ (total // 60)|string }}m {{ (total % 60)|string }}s
+            {{ (total // 60) }}m {{ (total % 60) }}s
           {% else %}
-            --:--:--
+            --
           {% endif %}
         </td>
         <td>{{ s.events|selectattr('event_type','equalto','stop')|list|length }}</td>
-        <td>{{ s.note }}</td>
+        <td>{{ s.events|selectattr('event_type','equalto','skip')|list|length }}</td>
         <td>
-          <button onclick="deleteSession('{{ s.id }}')">Delete</button>
+          {{ s.events|selectattr('event_type','in',['long_break','short_break'])|list|length }}
         </td>
+        <td>{{ s.note }}</td>
       </tr>
       {% endfor %}
     </tbody>
@@ -78,190 +116,273 @@
     </div>
     <div id="chat-log"></div>
     <div id="chat-input-area">
-      <!-- Analyze button -->
       <button id="analyzeBtn">Analyze My Sessions</button>
       <input id="chat-input" placeholder="Ask me..." />
       <button id="chat-send">Send</button>
     </div>
   </div>
 </div>
+
 {% endblock %}
 
 {% block scripts %}
 <script>
-  // Timer setup
-  let totalMs = 25 * 60 * 1000;
-  let remainingMs = totalMs;
-  let interval = null;
-  let currentSessionId = null;
+let currentMode = 'work';
+let baseTime = 25 * 60 * 1000;
+let shortBreakTime = 5 * 60 * 1000;
+let longBreakTime = 15 * 60 * 1000;
 
-  const timerDisplay = document.getElementById('timer');
-  const progressCircle = document.getElementById('progressCircle');
-  const radius = 80;
-  const circumference = 2 * Math.PI * radius;
-  progressCircle.style.strokeDasharray = circumference;
+let totalMs = baseTime;
+let remainingMs = totalMs;
+let interval = null;
+let currentSessionId = null;
+let sessionActive = false;
+let isPaused = false;
 
-  function updateTimerDisplay() {
-    const m = Math.floor(remainingMs / 60000);
-    const s = Math.floor((remainingMs % 60000) / 1000);
-    const ms = remainingMs % 1000;
-    timerDisplay.textContent = 
-      `${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}:${String(ms).padStart(3,'0')}`;
-  }
+const timerDisplay = document.getElementById('timer');
+const progressCircle = document.getElementById('progressCircle');
+const radius = 80;
+const circumference = 2 * Math.PI * radius;
+progressCircle.style.strokeDasharray = circumference;
 
-  function updateProgressCircle() {
-    const offset = circumference * (1 - remainingMs / totalMs);
-    progressCircle.style.strokeDashoffset = offset;
-  }
+// Elements
+const chatToggle = document.getElementById('chat-toggle');
+const chatWidget = document.getElementById('chat-widget');
+const chatClose  = document.getElementById('chat-close');
 
-  function tick() {
-    remainingMs = Math.max(0, remainingMs - 50);
-    if (remainingMs === 0) clearInterval(interval);
-    updateTimerDisplay();
-    updateProgressCircle();
-  }
+const startBtn = document.getElementById('startBtn');
+const resumeBtn = document.getElementById('resumeBtn');
+const stopBtn = document.getElementById('stopBtn');
+const skipBtn = document.getElementById('skipBtn');
+const saveBtn = document.getElementById('saveBtn');
+const resetBtn = document.getElementById('resetBtn');
+const longBreakBtn = document.getElementById('longBreakBtn');
+const shortBreakBtn = document.getElementById('shortBreakBtn');
+const clickSound = document.getElementById('clickSound');
 
-  // Start
-  document.getElementById('startBtn').onclick = async () => {
-    document.getElementById('clickSound').play();
-    if (!currentSessionId) {
-      const res = await fetch('{{ url_for("session_start") }}', { method: 'POST' });
-      const { session_id } = await res.json();
-      currentSessionId = session_id;
+function updateTimerDisplay() {
+  const m = Math.floor(remainingMs / 60000);
+  const s = Math.floor((remainingMs % 60000) / 1000);
+  const ms = remainingMs % 1000;
+  timerDisplay.textContent = 
+    `${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}:${String(ms).padStart(3,'0')}`;
+}
+
+chatToggle.addEventListener('click', () => {
+  chatWidget.classList.toggle('hidden');
+});
+
+chatClose.addEventListener('click', () => {
+  chatWidget.classList.add('hidden');
+});
+
+chatInput.addEventListener('keypress', e => {
+  if (e.key === 'Enter') chatSend.click();
+});
+
+chatSend.addEventListener('click', async () => {
+  const text = chatInput.value.trim();
+  if (!text) return;
+  clickSound.play();
+  // show the user’s message
+  chatLog.innerHTML += `<div class="user-msg">${text}</div>`;
+  chatInput.value = '';
+  // send to your backend
+  const res = await fetch('/chat/message', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ message: text })
+  });
+  if (!res.ok) return console.error('Send failed');
+  const reply = await res.text();               // or .json()
+  chatLog.innerHTML += `<div class="bot-msg">${reply}</div>`;
+});
+
+analyzeBtn.addEventListener('click', async () => {
+  clickSound.play();
+  // example: call your backend endpoint that returns analysis HTML or JSON
+  const res = await fetch('/chat/analyze', { method: 'POST' });
+  if (!res.ok) return console.error('Analyze failed');
+  const html = await res.text();               // or res.json() if it’s JSON
+  chatLog.innerHTML += `<div class="bot-msg">${html}</div>`;
+  // make sure the chat pane is visible
+  chatWidget.classList.remov
+  
+  e('hidden');
+});
+function updateProgressCircle() {
+  const offset = circumference * (1 - remainingMs / totalMs);
+  progressCircle.style.strokeDashoffset = offset;
+}
+
+function toggleControls(active) {
+    // Show start button only when not active and not paused
+    startBtn.classList.toggle('hidden', active || isPaused);
+  // Show resume button only when paused
+  resumeBtn.classList.toggle('hidden', !isPaused);
+  // Show stop/skip buttons only when active
+  stopBtn.classList.toggle('hidden', !active);
+  skipBtn.classList.toggle('hidden', !active);
+  // Show break buttons when active OR paused
+  longBreakBtn.classList.toggle('hidden', !(active || isPaused));
+  shortBreakBtn.classList.toggle('hidden', !(active || isPaused));
+}
+
+async function logEvent(type) {
+  if (!currentSessionId) return;
+  await fetch('/log-event', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({ session_id: currentSessionId, event_type: type })
+  });
+}
+
+function setTimer(duration, mode) {
+  totalMs = duration;
+  remainingMs = duration;
+  currentMode = mode;
+  updateTimerDisplay();
+  updateProgressCircle();
+}
+
+function tick() {
+  if (isPaused) return; 
+
+  remainingMs = Math.max(0, remainingMs - 50);
+  updateTimerDisplay();
+  updateProgressCircle();
+
+  if (remainingMs <= 0) {
+    clearInterval(interval);
+    interval = null;
+
+    if (currentMode === 'work') {
+      setTimer(shortBreakTime, 'auto_break');
+    } else {
+      setTimer(baseTime, 'work');
     }
-    if (!interval) interval = setInterval(tick, 50);
-    document.getElementById('stopBtn').disabled = false;
-    document.getElementById('startBtn').disabled = true;
-  };
 
-  // Stop
-  document.getElementById('stopBtn').onclick = async () => {
-    document.getElementById('clickSound').play();
-    clearInterval(interval); interval = null;
-    await fetch('{{ url_for("session_stop") }}', {
-      method: 'POST',
-      headers: {'Content-Type':'application/json'},
-      body: JSON.stringify({ session_id: currentSessionId })
-    });
-    document.getElementById('saveBtn').disabled = false;
-    document.getElementById('stopBtn').disabled = true;
-    document.getElementById('startBtn').disabled = false;
-  };
+    if (!isPaused) {
+      interval = setInterval(tick, 50);
+    }
+  }
+}
 
-  // Save
-  document.getElementById('saveBtn').onclick = async () => {
-    document.getElementById('clickSound').play();
-    const note = document.getElementById('taskNote').value;
-    await fetch('{{ url_for("session_save") }}', {
-      method: 'POST',
-      headers: {'Content-Type':'application/json'},
-      body: JSON.stringify({ session_id: currentSessionId, note })
-    });
-    alert('Session saved!');
-    resetTimer();
+startBtn.onclick = async () => {
+  clickSound.play();
+  if (!sessionActive) {
+    const res = await fetch('/session/start', { method: 'POST' });
+    const { session_id } = await res.json();
+    currentSessionId = session_id;
+    sessionActive = true;
+    saveBtn.classList.remove('hidden');
+  }
+
+  if (!interval) {
+    interval = setInterval(tick, 50);
+    isPaused = false;
+    toggleControls(true);
+  }
+};
+
+resumeBtn.onclick = async () => {
+  clickSound.play();
+  isPaused = false;
+  interval = setInterval(tick, 50);
+  toggleControls(true);
+};
+
+stopBtn.onclick = async () => {
+  clickSound.play();
+  if (interval) {
+    clearInterval(interval);
+    interval = null;
+    isPaused = true;
+  }
+  await logEvent('stop');
+  toggleControls(false);
+};
+
+
+skipBtn.onclick = async () => {
+  clickSound.play();
+  await logEvent('skip');
+  if (currentMode === 'work') {
+    setTimer(shortBreakTime, 'auto_break');
+    interval = setInterval(tick, 50);
+  }
+};
+
+shortBreakBtn.onclick = async () => {
+  clickSound.play();
+  await logEvent('short_break');
+  setTimer(shortBreakTime, 'manual_break');
+  interval = setInterval(tick, 50);
+};
+
+longBreakBtn.onclick = async () => {
+  clickSound.play();
+  await logEvent('long_break');
+  setTimer(longBreakTime, 'manual_break');
+  interval = setInterval(tick, 50);
+};
+
+saveBtn.onclick = async () => {
+  clickSound.play();
+  sessionActive = false;
+  isPaused = false;
+  clearInterval(interval);
+  await fetch('/log-event', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({ session_id: currentSessionId, event_type: 'save' })
+  });
+  const saveRes = await fetch('/session/save', {
+    method: 'POST',
+    headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({ session_id: currentSessionId })
+  });
+  
+  if(saveRes.ok) {
+    // Reset state after saving
+    currentSessionId = null;
+    setTimer(baseTime, 'work');
+    saveBtn.classList.add('hidden');
+    toggleControls(false);
     location.reload();
-  };
+  }
+};
 
-  // Reset
-  document.getElementById('resetBtn').onclick = async () => {
-    document.getElementById('clickSound').play();
-    if (currentSessionId && confirm('Discard current session?')) {
-      await fetch('{{ url_for("session_reset") }}', {
+resetBtn.onclick = async () => {
+  clickSound.play();
+  if (confirm('Reset current session?')) {
+    sessionActive = false;
+    isPaused = false;
+    clearInterval(interval);
+    
+    if (currentSessionId) {
+      await fetch('/session/reset', {
         method: 'POST',
         headers: {'Content-Type':'application/json'},
         body: JSON.stringify({ session_id: currentSessionId })
       });
     }
-    resetTimer();
-  };
-
-  function resetTimer() {
-    clearInterval(interval);
-    remainingMs = totalMs;
+    
+    // Reset all local state
     currentSessionId = null;
+    setTimer(baseTime, 'work');
+    saveBtn.classList.add('hidden');
+    toggleControls(false);
+    
+    // Force UI update
     updateTimerDisplay();
     updateProgressCircle();
-    document.getElementById('startBtn').disabled = false;
-    document.getElementById('stopBtn').disabled = true;
-    document.getElementById('saveBtn').disabled = true;
   }
+};
 
-  // Delete session
-  async function deleteSession(id) {
-    document.getElementById('clickSound').play();
-    if (!confirm('Delete this session?')) return;
-    const res = await fetch('{{ url_for("session_delete") }}', {
-      method: 'POST',
-      headers: {'Content-Type':'application/json'},
-      body: JSON.stringify({ session_id: id })
-    });
-    if (res.ok) location.reload();
-    else alert('Failed to delete.');
-  }
-
-  // Chat widget
-  const chatToggle = document.getElementById('chat-toggle');
-  const chatWidget = document.getElementById('chat-widget');
-  const chatClose  = document.getElementById('chat-close');
-  const log        = document.getElementById('chat-log');
-  const input      = document.getElementById('chat-input');
-  const sendBtn    = document.getElementById('chat-send');
-  const analyzeBtn = document.getElementById('analyzeBtn');
-
-  chatToggle.addEventListener('click', () => {
-    chatWidget.classList.toggle('hidden');
-    input.focus();
-  });
-  chatClose.addEventListener('click', () => {
-    chatWidget.classList.add('hidden');
-  });
-
-  function appendUser(msg) {
-    log.innerHTML += `<div class="user-msg">You: ${msg}</div>`;
-    log.scrollTop = log.scrollHeight;
-  }
-
-  async function postChat(url, payload) {
-    log.innerHTML += `<div class="bot-msg" id="bot-typing">Bot: </div>`;
-    log.scrollTop = log.scrollHeight;
-    try {
-      const res = await fetch(url, {
-        method: 'POST',
-        headers: {'Content-Type':'application/json'},
-        body: JSON.stringify(payload)
-      });
-      const data = await res.json();
-      const resp = data.response || '';
-      const botEl = document.getElementById('bot-typing');
-      let i = 0;
-      const iv = setInterval(() => {
-        botEl.textContent += resp[i] || '';
-        if (i++ >= resp.length) clearInterval(iv);
-      }, 50);
-    } catch (e) {
-      log.innerHTML += `<div class="error-msg">Error: ${e}</div>`;
-      log.scrollTop = log.scrollHeight;
-    }
-  }
-
-  sendBtn.addEventListener('click', () => {
-    const text = input.value.trim();
-    if (!text) return;
-    appendUser(text);
-    postChat("{{ url_for('chat.chat') }}", { message: text });
-    input.value = '';
-  });
-  input.addEventListener('keydown', e => {
-    if (e.key === 'Enter') { e.preventDefault(); sendBtn.click(); }
-  });
-
-  analyzeBtn.addEventListener('click', () => {
-    appendUser('Analyze my last Pomodoro sessions');
-    postChat("{{ url_for('chat.analyze_sessions') }}", {});
-  });
-
-  // initialize display
-  updateTimerDisplay();
-  updateProgressCircle();
+toggleControls(false);
+saveBtn.classList.add('hidden');
+updateTimerDisplay();
+updateProgressCircle();
 </script>
 {% endblock %}

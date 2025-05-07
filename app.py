@@ -9,12 +9,12 @@ from flask import Flask, render_template, url_for, redirect, request, flash, jso
 import openai
 import os
 from dotenv import load_dotenv
+from datetime import datetime  
 
 
 
 def create_app():
     load_dotenv()
-    
     app = Flask(__name__)
 
     # Config
@@ -87,52 +87,54 @@ def create_app():
         )
         return render_template('dashboard.html', username=current_user.username, sessions=sessions)
 
-    # Session endpoints
     @app.route('/session/start', methods=['POST'])
     @login_required
     def session_start():
-        sess = Session(user=current_user)
-        db.session.add(sess)
+        session = Session(user_id=current_user.id)
+        db.session.add(session)
         db.session.commit()
-        evt = SessionEvent(session_id=sess.id, event_type='start')
-        db.session.add(evt)
+        event = SessionEvent(session_id=session.id, event_type='start')
+        db.session.add(event)
         db.session.commit()
-        return jsonify({'session_id': sess.id}), 201
+        return jsonify({'session_id': session.id}), 201
 
-    @app.route('/session/stop', methods=['POST'])
+    @app.route('/log-event', methods=['POST'])
     @login_required
-    def session_stop():
+    def log_event():
         data = request.get_json() or {}
-        sess_id = data.get('session_id')
-        session = Session.query.filter_by(id=sess_id, user_id=current_user.id).first_or_404()
-        evt = SessionEvent(session_id=session.id, event_type='stop')
+        sess = Session.query.filter_by(
+            id=data.get('session_id'),
+            user_id=current_user.id
+        ).first_or_404()
+        evt = SessionEvent(
+            session_id=sess.id,
+            event_type=data.get('event_type')
+        )
         db.session.add(evt)
-        session.ended_at = datetime.utcnow()
+        # ak chceš pri „save“ evente zavrieť session:
+        if data.get('event_type') == 'save':
+            sess.ended_at = datetime.utcnow()
         db.session.commit()
-        return jsonify({'status': 'ok'}), 201
+        return jsonify({'status': 'ok'}), 200
 
     @app.route('/session/save', methods=['POST'])
     @login_required
     def session_save():
-        data = request.get_json() or {}
-        sess_id = data.get('session_id')
-        note = data.get('note', '')
-        session = Session.query.filter_by(id=sess_id, user_id=current_user.id).first_or_404()
-        session.note = note
+        data = request.get_json()
+        session = Session.query.get(data['session_id'])
         session.ended_at = datetime.utcnow()
+        session.note = data.get('note', '')
         db.session.commit()
-        return jsonify({'status': 'ok'}), 200
+        return jsonify({'status': 'saved'}), 200
 
     @app.route('/session/reset', methods=['POST'])
     @login_required
     def session_reset():
-        data = request.get_json() or {}
-        sess_id = data.get('session_id')
-        session = Session.query.filter_by(id=sess_id, user_id=current_user.id).first_or_404()
-        SessionEvent.query.filter_by(session_id=session.id).delete()
-        db.session.delete(session)
+        data = request.get_json()
+        SessionEvent.query.filter_by(session_id=data['session_id']).delete()
+        Session.query.filter_by(id=data['session_id']).delete()
         db.session.commit()
-        return jsonify({'status': 'ok'}), 200
+        return jsonify({'status': 'reset'}), 200
 
     @app.route('/session/delete', methods=['POST'])
     @login_required
@@ -144,6 +146,25 @@ def create_app():
         db.session.delete(session)
         db.session.commit()
         return jsonify({'status': 'deleted'}), 200
+
+    @app.route('/session/stop', methods=['POST'])
+    @login_required
+    def session_stop():
+        data = request.get_json() or {}
+        sess = Session.query.filter_by(
+            id=data.get('session_id'),
+            user_id=current_user.id
+        ).first_or_404()
+        event = SessionEvent(
+            session_id=sess.id,
+            event_type='stop'
+        )
+        db.session.add(event)
+        sess.ended_at = datetime.utcnow()
+        db.session.commit()
+
+        return jsonify({'status': 'stopped'}), 200
+
 
     with app.app_context():
         db.create_all()
