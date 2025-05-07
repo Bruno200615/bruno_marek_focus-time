@@ -126,263 +126,272 @@
 {% endblock %}
 
 {% block scripts %}
-<script>
-let currentMode = 'work';
-let baseTime = 25 * 60 * 1000;
-let shortBreakTime = 5 * 60 * 1000;
-let longBreakTime = 15 * 60 * 1000;
-
-let totalMs = baseTime;
-let remainingMs = totalMs;
-let interval = null;
-let currentSessionId = null;
-let sessionActive = false;
-let isPaused = false;
-
-const timerDisplay = document.getElementById('timer');
-const progressCircle = document.getElementById('progressCircle');
-const radius = 80;
-const circumference = 2 * Math.PI * radius;
-progressCircle.style.strokeDasharray = circumference;
-
-// Elements
-const chatToggle = document.getElementById('chat-toggle');
-const chatWidget = document.getElementById('chat-widget');
-const chatClose  = document.getElementById('chat-close');
-
-const startBtn = document.getElementById('startBtn');
-const resumeBtn = document.getElementById('resumeBtn');
-const stopBtn = document.getElementById('stopBtn');
-const skipBtn = document.getElementById('skipBtn');
-const saveBtn = document.getElementById('saveBtn');
-const resetBtn = document.getElementById('resetBtn');
-const longBreakBtn = document.getElementById('longBreakBtn');
-const shortBreakBtn = document.getElementById('shortBreakBtn');
-const clickSound = document.getElementById('clickSound');
-
-function updateTimerDisplay() {
-  const m = Math.floor(remainingMs / 60000);
-  const s = Math.floor((remainingMs % 60000) / 1000);
-  const ms = remainingMs % 1000;
-  timerDisplay.textContent = 
-    `${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}:${String(ms).padStart(3,'0')}`;
-}
-
-chatToggle.addEventListener('click', () => {
-  chatWidget.classList.toggle('hidden');
-});
-
-chatClose.addEventListener('click', () => {
-  chatWidget.classList.add('hidden');
-});
-
-chatInput.addEventListener('keypress', e => {
-  if (e.key === 'Enter') chatSend.click();
-});
-
-chatSend.addEventListener('click', async () => {
-  const text = chatInput.value.trim();
-  if (!text) return;
-  clickSound.play();
-  // show the user’s message
-  chatLog.innerHTML += `<div class="user-msg">${text}</div>`;
-  chatInput.value = '';
-  // send to your backend
-  const res = await fetch('/chat/message', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ message: text })
-  });
-  if (!res.ok) return console.error('Send failed');
-  const reply = await res.text();               // or .json()
-  chatLog.innerHTML += `<div class="bot-msg">${reply}</div>`;
-});
-
-analyzeBtn.addEventListener('click', async () => {
-  clickSound.play();
-  // example: call your backend endpoint that returns analysis HTML or JSON
-  const res = await fetch('/chat/analyze', { method: 'POST' });
-  if (!res.ok) return console.error('Analyze failed');
-  const html = await res.text();               // or res.json() if it’s JSON
-  chatLog.innerHTML += `<div class="bot-msg">${html}</div>`;
-  // make sure the chat pane is visible
-  chatWidget.classList.remov
-  
-  e('hidden');
-});
-function updateProgressCircle() {
-  const offset = circumference * (1 - remainingMs / totalMs);
-  progressCircle.style.strokeDashoffset = offset;
-}
-
-function toggleControls(active) {
-    // Show start button only when not active and not paused
-    startBtn.classList.toggle('hidden', active || isPaused);
-  // Show resume button only when paused
-  resumeBtn.classList.toggle('hidden', !isPaused);
-  // Show stop/skip buttons only when active
-  stopBtn.classList.toggle('hidden', !active);
-  skipBtn.classList.toggle('hidden', !active);
-  // Show break buttons when active OR paused
-  longBreakBtn.classList.toggle('hidden', !(active || isPaused));
-  shortBreakBtn.classList.toggle('hidden', !(active || isPaused));
-}
-
-async function logEvent(type) {
-  if (!currentSessionId) return;
-  await fetch('/log-event', {
-    method: 'POST',
-    headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({ session_id: currentSessionId, event_type: type })
-  });
-}
-
-function setTimer(duration, mode) {
-  totalMs = duration;
-  remainingMs = duration;
-  currentMode = mode;
-  updateTimerDisplay();
-  updateProgressCircle();
-}
-
-function tick() {
-  if (isPaused) return; 
-
-  remainingMs = Math.max(0, remainingMs - 50);
-  updateTimerDisplay();
-  updateProgressCircle();
-
-  if (remainingMs <= 0) {
-    clearInterval(interval);
-    interval = null;
-
-    if (currentMode === 'work') {
-      setTimer(shortBreakTime, 'auto_break');
-    } else {
-      setTimer(baseTime, 'work');
+<script>let currentMode = 'work';
+    let baseTime = 25 * 60 * 1000;
+    let shortBreakTime = 5 * 60 * 1000;
+    let longBreakTime = 15 * 60 * 1000;
+    
+    let totalMs = baseTime;
+    let remainingMs = totalMs;
+    let interval = null;
+    let currentSessionId = null;
+    let sessionActive = false;
+    let isPaused = false;
+    
+    // Element references
+    const timerDisplay = document.getElementById('timer');
+    const progressCircle = document.getElementById('progressCircle');
+    const radius = 80;
+    const circumference = 2 * Math.PI * radius;
+    progressCircle.style.strokeDasharray = circumference;
+    
+    // Chat elements
+    const chatToggle = document.getElementById('chat-toggle');
+    const chatWidget = document.getElementById('chat-widget');
+    const chatClose = document.getElementById('chat-close');
+    const chatInput = document.getElementById('chat-input');
+    const chatSend = document.getElementById('chat-send');
+    const analyzeBtn = document.getElementById('analyzeBtn');
+    const chatLog = document.getElementById('chat-log');
+    
+    // Control buttons
+    const startBtn = document.getElementById('startBtn');
+    const resumeBtn = document.getElementById('resumeBtn');
+    const stopBtn = document.getElementById('stopBtn');
+    const skipBtn = document.getElementById('skipBtn');
+    const saveBtn = document.getElementById('saveBtn');
+    const resetBtn = document.getElementById('resetBtn');
+    const longBreakBtn = document.getElementById('longBreakBtn');
+    const shortBreakBtn = document.getElementById('shortBreakBtn');
+    const clickSound = document.getElementById('clickSound');
+    
+    function updateTimerDisplay() {
+        const m = Math.floor(remainingMs / 60000);
+        const s = Math.floor((remainingMs % 60000) / 1000);
+        const ms = remainingMs % 1000;
+        timerDisplay.textContent = 
+            `${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}:${String(ms).padStart(3,'0')}`;
     }
-
-    if (!isPaused) {
-      interval = setInterval(tick, 50);
+    
+    function updateProgressCircle() {
+        const offset = circumference * (1 - remainingMs / totalMs);
+        progressCircle.style.strokeDashoffset = offset;
     }
-  }
-}
-
-startBtn.onclick = async () => {
-  clickSound.play();
-  if (!sessionActive) {
-    const res = await fetch('/session/start', { method: 'POST' });
-    const { session_id } = await res.json();
-    currentSessionId = session_id;
-    sessionActive = true;
-    saveBtn.classList.remove('hidden');
-  }
-
-  if (!interval) {
-    interval = setInterval(tick, 50);
-    isPaused = false;
-    toggleControls(true);
-  }
-};
-
-resumeBtn.onclick = async () => {
-  clickSound.play();
-  isPaused = false;
-  interval = setInterval(tick, 50);
-  toggleControls(true);
-};
-
-stopBtn.onclick = async () => {
-  clickSound.play();
-  if (interval) {
-    clearInterval(interval);
-    interval = null;
-    isPaused = true;
-  }
-  await logEvent('stop');
-  toggleControls(false);
-};
-
-
-skipBtn.onclick = async () => {
-  clickSound.play();
-  await logEvent('skip');
-  if (currentMode === 'work') {
-    setTimer(shortBreakTime, 'auto_break');
-    interval = setInterval(tick, 50);
-  }
-};
-
-shortBreakBtn.onclick = async () => {
-  clickSound.play();
-  await logEvent('short_break');
-  setTimer(shortBreakTime, 'manual_break');
-  interval = setInterval(tick, 50);
-};
-
-longBreakBtn.onclick = async () => {
-  clickSound.play();
-  await logEvent('long_break');
-  setTimer(longBreakTime, 'manual_break');
-  interval = setInterval(tick, 50);
-};
-
-saveBtn.onclick = async () => {
-  clickSound.play();
-  sessionActive = false;
-  isPaused = false;
-  clearInterval(interval);
-  await fetch('/log-event', {
-    method: 'POST',
-    headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({ session_id: currentSessionId, event_type: 'save' })
-  });
-  const saveRes = await fetch('/session/save', {
-    method: 'POST',
-    headers: {'Content-Type':'application/json'},
-    body: JSON.stringify({ session_id: currentSessionId })
-  });
-  
-  if(saveRes.ok) {
-    // Reset state after saving
-    currentSessionId = null;
-    setTimer(baseTime, 'work');
-    saveBtn.classList.add('hidden');
+    
+    function toggleControls(active) {
+        startBtn.classList.toggle('hidden', active || isPaused);
+        resumeBtn.classList.toggle('hidden', !isPaused);
+        stopBtn.classList.toggle('hidden', !active);
+        skipBtn.classList.toggle('hidden', !active);
+        longBreakBtn.classList.toggle('hidden', !(active || isPaused));
+        shortBreakBtn.classList.toggle('hidden', !(active || isPaused));
+    }
+    
+    async function logEvent(type) {
+        if (!currentSessionId) return;
+        await fetch('/log-event', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ session_id: currentSessionId, event_type: type })
+        });
+    }
+    
+    function setTimer(duration, mode) {
+        totalMs = duration;
+        remainingMs = duration;
+        currentMode = mode;
+        updateTimerDisplay();
+        updateProgressCircle();
+    }
+    
+    function tick() {
+        if (isPaused) return; 
+    
+        remainingMs = Math.max(0, remainingMs - 50);
+        updateTimerDisplay();
+        updateProgressCircle();
+    
+        if (remainingMs <= 0) {
+            clearInterval(interval);
+            interval = null;
+    
+            if (currentMode === 'work') {
+                setTimer(shortBreakTime, 'auto_break');
+            } else {
+                setTimer(baseTime, 'work');
+            }
+    
+            if (!isPaused) {
+                interval = setInterval(tick, 50);
+            }
+        }
+    }
+    
+    // Chat functionality
+    chatToggle.addEventListener('click', () => {
+        chatWidget.classList.toggle('hidden');
+    });
+    
+    chatClose.addEventListener('click', () => {
+        chatWidget.classList.add('hidden');
+    });
+    
+    chatInput.addEventListener('keypress', e => {
+        if (e.key === 'Enter') chatSend.click();
+    });
+    
+    chatSend.addEventListener('click', async () => {
+        const text = chatInput.value.trim();
+        if (!text) return;
+        
+        clickSound.play();
+        chatLog.innerHTML += `<div class="user-msg">${text}</div>`;
+        chatInput.value = '';
+        chatLog.lastElementChild.scrollIntoView();
+    
+        try {
+            const res = await fetch('/chat/message', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ message: text })
+            });
+            if (!res.ok) throw new Error('Send failed');
+            const reply = await res.text();
+            chatLog.innerHTML += `<div class="bot-msg">${reply}</div>`;
+            chatLog.lastElementChild.scrollIntoView();
+        } catch (error) {
+            console.error('Send error:', error);
+            chatLog.innerHTML += `<div class="bot-msg error">Error: ${error.message}</div>`;
+        }
+    });
+    
+    analyzeBtn.addEventListener('click', async () => {
+        clickSound.play();
+        try {
+            const res = await fetch('/chat/analyze', { method: 'POST' });
+            if (!res.ok) throw new Error('Analysis failed');
+            const html = await res.text();
+            chatLog.innerHTML += `<div class="bot-msg">${html}</div>`;
+            chatWidget.classList.remove('hidden');
+            chatLog.lastElementChild.scrollIntoView();
+        } catch (error) {
+            console.error('Analysis error:', error);
+            chatLog.innerHTML += `<div class="bot-msg error">Error: ${error.message}</div>`;
+        }
+    });
+    
+    // Timer controls
+    startBtn.onclick = async () => {
+        clickSound.play();
+        if (!sessionActive) {
+            const res = await fetch('/session/start', { method: 'POST' });
+            const { session_id } = await res.json();
+            currentSessionId = session_id;
+            sessionActive = true;
+            saveBtn.classList.remove('hidden');
+        }
+    
+        if (!interval) {
+            interval = setInterval(tick, 50);
+            isPaused = false;
+            toggleControls(true);
+        }
+    };
+    
+    resumeBtn.onclick = async () => {
+        clickSound.play();
+        isPaused = false;
+        interval = setInterval(tick, 50);
+        toggleControls(true);
+    };
+    
+    stopBtn.onclick = async () => {
+        clickSound.play();
+        if (interval) {
+            clearInterval(interval);
+            interval = null;
+            isPaused = true;
+        }
+        await logEvent('stop');
+        toggleControls(false);
+    };
+    
+    skipBtn.onclick = async () => {
+        clickSound.play();
+        await logEvent('skip');
+        if (currentMode === 'work') {
+            setTimer(shortBreakTime, 'auto_break');
+            interval = setInterval(tick, 50);
+        }
+    };
+    
+    shortBreakBtn.onclick = async () => {
+        clickSound.play();
+        await logEvent('short_break');
+        setTimer(shortBreakTime, 'manual_break');
+        interval = setInterval(tick, 50);
+    };
+    
+    longBreakBtn.onclick = async () => {
+        clickSound.play();
+        await logEvent('long_break');
+        setTimer(longBreakTime, 'manual_break');
+        interval = setInterval(tick, 50);
+    };
+    
+    saveBtn.onclick = async () => {
+        clickSound.play();
+        sessionActive = false;
+        isPaused = false;
+        clearInterval(interval);
+        await fetch('/log-event', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ session_id: currentSessionId, event_type: 'save' })
+        });
+        const saveRes = await fetch('/session/save', {
+            method: 'POST',
+            headers: {'Content-Type':'application/json'},
+            body: JSON.stringify({ session_id: currentSessionId })
+        });
+        
+        if(saveRes.ok) {
+            currentSessionId = null;
+            setTimer(baseTime, 'work');
+            saveBtn.classList.add('hidden');
+            toggleControls(false);
+            location.reload();
+        }
+    };
+    
+    resetBtn.onclick = async () => {
+        clickSound.play();
+        if (confirm('Reset current session?')) {
+            sessionActive = false;
+            isPaused = false;
+            clearInterval(interval);
+            
+            if (currentSessionId) {
+                await fetch('/session/reset', {
+                    method: 'POST',
+                    headers: {'Content-Type':'application/json'},
+                    body: JSON.stringify({ session_id: currentSessionId })
+                });
+            }
+            
+            currentSessionId = null;
+            setTimer(baseTime, 'work');
+            saveBtn.classList.add('hidden');
+            toggleControls(false);
+            updateTimerDisplay();
+            updateProgressCircle();
+        }
+    };
+    
+    // Initial setup
     toggleControls(false);
-    location.reload();
-  }
-};
-
-resetBtn.onclick = async () => {
-  clickSound.play();
-  if (confirm('Reset current session?')) {
-    sessionActive = false;
-    isPaused = false;
-    clearInterval(interval);
-    
-    if (currentSessionId) {
-      await fetch('/session/reset', {
-        method: 'POST',
-        headers: {'Content-Type':'application/json'},
-        body: JSON.stringify({ session_id: currentSessionId })
-      });
-    }
-    
-    // Reset all local state
-    currentSessionId = null;
-    setTimer(baseTime, 'work');
     saveBtn.classList.add('hidden');
-    toggleControls(false);
-    
-    // Force UI update
     updateTimerDisplay();
     updateProgressCircle();
-  }
-};
-
-toggleControls(false);
-saveBtn.classList.add('hidden');
-updateTimerDisplay();
-updateProgressCircle();
 </script>
 {% endblock %}
